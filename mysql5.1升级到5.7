@@ -1,0 +1,172 @@
+两种升级方式
+In-Place Upgrade:
+1 停止mysql
+2 替换mysql的安装文件
+3 使用现有的data目录重启mysql
+4 运行mysql_upgrade
+
+Logical Upgrade:
+1 用mysqldump导出数据
+2 安装新版mysql
+3 导入数据
+4 运行mysql_upgrade
+
+5.1升级到5.7变化很大，直接inplace升级会报错。先升级到5.6
+5.6也不能直接升级到8.0,会报错,要先升级到5.7.23
+
+5.1是使用yum安装，所有采用rpms升级。编译安装的类似。
+
+注意：5.1的datadir为/cache1/mysqlData/，使用/etc/my.cnf
+默认安装的datadir为/var/lib/mysql
+
+in-place升级到5.6
+1 安全停止mysql
+>SET GLOBAL innodb_fast_shutdown=0;
+service mysqld stop
+
+2 安装5.6的rpms包
+rpm -Uvh MySQL-devel*.rpm MySQL-client*.rpm MySQL-shared*.rpm MySQL-shared-compat*.rpm
+#5.1是用yum安装，来源不一样，不能直接升级，要先卸载.
+rpm -e mysql-server
+rpm -ivh MySQL-server*.rpm 
+
+3 删除默认安装的文件
+rm -f /root/.mysql_secret
+rm -rf /var/lib/mysql
+rm -f /root/.mysql_history
+rm -f /etc/my.cnf.rpmnew
+rm -f /var/log/mysqld.log
+
+4 修改my.cnf
+----
+[client]
+port        = 3306
+socket      = /cache1/mysqlData/mysql.sock
+
+[mysqld]
+port        = 3306
+socket      = /cache1/mysqlData/mysql.sock
+datadir=/cache1/mysqlData
+user=mysql
+character-set-server = utf8
+collation-server = utf8_general_ci
+key_buffer_size = 16M
+max_allowed_packet = 1M
+table_open_cache = 64
+sort_buffer_size = 512K
+net_buffer_length = 8K
+read_buffer_size = 256K
+read_rnd_buffer_size = 512K
+myisam_sort_buffer_size = 8M
+max_connections=650
+
+log-bin=mysql-bin
+binlog_format=mixed
+expire_logs_days=7
+server-id   = 240236
+
+innodb_buffer_pool_size=30G
+innodb_log_file_size = 512M
+
+[mysqld_safe]
+log-error=/cache1/mysqlData/mysql_error.err
+pid-file=/cache1/mysqlData/mysqld.pid
+
+[mysqldump]
+quick
+max_allowed_packet = 16M
+
+[mysql]
+no-auto-rehash
+
+[myisamchk]
+key_buffer_size = 20M
+sort_buffer_size = 20M
+read_buffer = 2M
+write_buffer = 2M
+
+[mysqlhotcopy]
+interactive-timeout
+====
+5.6 不支持skip-locking和default-character-set
+
+启动mysql5.6
+service mysql start
+运行upgrade，升级系统表结构
+mysql_upgrade  --defaults-file=/etc/my.cnf -uroot -p
+重启，应用新的表结构
+service mysql restart
+登录查看是否正常
+mysql -uroot -p
+
+5.6升级到5.7
+1 设置安全关闭
+>SET GLOBAL innodb_fast_shutdown=0
+service mysql stop
+
+2 安装5.7的rpms包
+rpm -Uvh mysql-community-common*.rpm mysql-community-server*.rpm mysql-community-devel*.rpm mysql-community-client*.rpm mysql-community-libs*.rpm mysql-community-libs-compat*.rpm
+
+3 删除默认安装的文件
+rm -f /root/.mysql_secret
+rm -rf /var/lib/mysql
+rm -f /root/.mysql_history
+rm -f /etc/my.cnf.rpmnew
+rm -f /var/log/mysqld.log
+4 修改my.cnf
+----
+#兼容5.6
+sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES
+====
+
+#启动服务
+service mysqld start
+#升级表结构
+mysql_upgrade -uroot -p
+重启
+service mysqld restart
+
+注：可以设置主从，从5.7，主5.1
+要先升级,再主从.否则升级会重置主从的位置
+
+升级后,可能会提示libmysqlclient.so.18 缺失,
+安装 MySQL-shared-5.6.38-1.el6.x86_64.rpm 可解决
+
+主从升级5.7
+从库my.cnf
+----
+[mysqld]
+#不自动启动slave进程
+skip-slave-start
+====
+
+主库my.cnf
+----
+#拒绝来自应用的TCP/IP的连接
+skip-networking
+====
+
+开启5.7的并行复制
+从库my.cnf
+----
+slave-parallel-type=LOGICAL_CLOCK
+slave-parallel-workers=4
+master_info_repository=TABLE
+relay_log_info_repository=TABLE
+relay_log_recovery=ON
+====
+
+主库my.cnf
+----
+binlog_group_commit_sync_delay=1000
+binlog_group_commit_sync_no_delay_count=20
+====
+
+卸载5.7
+rpm -qa|grep mysql
+rpm -e mysql-community-server
+rpm -e mysql-community-devel
+rpm -e mysql-community-client
+rpm --nodeps -e mysql-community-libs-compat
+rpm --nodeps -e mysql-community-libs
+rpm -e mysql-community-common

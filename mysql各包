@@ -1,0 +1,5 @@
+devel包：提供h文件，如mysql_config.h; my_config.h等
+shared包：提供提供libmysqlclient.so
+
+5.6 的shared包有libmysqlclient.so；5.7没有
+5.6，5.7的devel包有my_config.h；8的没有

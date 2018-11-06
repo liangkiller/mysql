@@ -1,0 +1,130 @@
+XtraBackup做mysql主从同步
+不重启或者停止主库的正常运行，不锁库锁表影响业务的正常运行
+
+Xtrabackup的优点：
+1、备份完成快速、可靠
+2、备份期间不间断的事务处理
+3、节省磁盘空间和网络带宽
+4、自动备份验证
+5、提高正常运行时间由于更快的恢复时间
+备份INNODB引擎的数据库不会锁库锁表，但是备份MyISAM的表还是会锁的，还支持增量备份。
+官方地址：
+https://www.percona.com/
+
+安装XtraBackup
+安装在主库上
+# yum install perl-DBD-MySQL perl-DBI -y
+
+# wget https://www.percona.com/downloads/XtraBackup/XtraBackup-2.2.9/binary/redhat/7/x86_64/percona-xtrabackup-2.2.9-5067.el7.x86_64.rpm
+
+# rpm -ivh percona-xtrabackup-2.2.9-5067.el7.x86_64.rpm
+
+xtrabackup --version
+xtrabackup version 2.3.4 based on MySQL server 5.6.24 Linux (x86_64) (revision id: e80c779)
+
+主库主从配置
+vi /etc/my.cnf
+----
+增加server-id 和 bin-log
+# vim /etc/my.cnf
+server-id = 128
+log-bin = mysql-bin
+====
+2.主库配置授权账号
+mysql> grant replication slave on *.* to repuser@'1.1.1.233' identified by '123';
+mysql> flush privileges;
+3.手动设置主库server-id和log-bin 参数
+set global server_id=128
+
+从库主从配置
+vi /etc/my.cnf
+----
+增加server-id 和 bin-log
+# vim /etc/my.cnf
+server-id = 129
+#如果需要在从库上做bin-log备份可以添加如下参数
+log-bin = mysql-bin
+log-slave-updates = 1
+expire-logs-days=10
+====
+备份主库数据
+1.主库机器上创建备份目录
+# mkdir -p /cache1/backup/full_data
+
+2.执行全库备份
+
+2.1.备份
+# innobackupex --defaults-file=/etc/my.cnf --user=root --password=XXX  --rsync --socket=/tmp/mysql.sock /cache1/backup/full_data
+PS:备份完成后，会在/backup/full_data/目录下生成一个时间点的目录，这里是2016-07-14_05-19-52。你也可以加一个--no-timestamp参数不产生这个目录，直接备份到/backup/full_data/目录下
+
+如果提示access deny，而账号密码没错，可以试着将密码用双引号或单引号包起来。
+
+2.2.重放redo log
+//应用 BACKUP-DIR 中的 xtrabackup_logfile 事务日志文件。一般情况下，在备份完成后，数据尚且不能用于恢复操作，因为备份的数据中可能会包含尚未提交的事务或已经提交但尚未同步至数据文件中的事务。因此，此时数据文件仍处于不一致状态。“准备”的主要作用正是通过回滚未提交的事务及同步已经提交的事务至数据文件使得数据文件处于一致性状态。
+
+#下面preparing，undo撤销未提交的事务，重放redo log
+# innobackupex --defaults-file=/etc/my.cnf --user=root --password=123 --apply-log --socket=/tmp/mysql.sock /cache1/backup/full_data/2016-07-14_05-19-52
+
+ps：1、ls -l /data/backup/full_data/2016-07-14_05-19-52/查看，你发现xtrabackup会把你数据库datadir下的所有数据 文件都复制过来还新增了5个xtrabackup_开头的文件，我们关心的是xtrabackup_binlog_info这个文件，因为这个文件里面记 录了你做从库需要change到主库的binlog的位置和pos点
+
+2、如果只想备份一个库，加“--include=navy”指定库名即可， “--databases=navy”不好使。
+
+恢复数据到从库
+1.停止从库
+# /etc/init.d/mysqld stop
+
+2.把主库备份文件拷贝到从库机器
+#如果xtrabackup_logfile太大,可删除
+rm -f xtrabackup_logfile
+# scp -ap /data/backup/full_data/2016-07-14_05-19-52 root@192.168.11.129:/data/mysql/
+
+#导入数据库,这步可省略.直接scp到datadir下即可
+innobackupex --defaults-file=/etc/my.cnf --copy-back 2012-04-19_10-46-32
+
+3.修改恢复文件权限
+# chown -R mysql:mysql /data/mysql/
+
+4.启动数据库
+# /etc/init.d/mysqld start
+
+5.确认数据是否恢复成功
+登录从库，执行show databases;
+
+6.确认同步的位置点
+在从库上或者主库上都可以查看该信息，我们是在从库上查看
+# cat /data/mysql/xtrabackup_binlog_info
+
+开始主从同步
+
+1.配置从库 主从配置
+#登录从库并执行
+
+mysql > CHANGE MASTER TO MASTER_HOST='192.168.199.182',MASTER_USER='rep', MASTER_PASSWORD='123',MASTER_LOG_FILE='mysql-bin.000016', MASTER_LOG_POS=4542174;
+set global read_only=1  #从库只读，不建议写在配置文件中
+
+#设置主库的用户，防火墙
+
+2.开始同步
+mysql> start slave;
+
+3.查看同步状态
+mysql> show slave status\G;
+Slave_IO_Running: Yes
+Slave_SQL_Running: Yes
+
+验证复制是否正常！
+查看主库Position号
+
+> show master status \G;
+----
+File: mysql-bin.000001
+Position: 449
+====
+
+查看从库
+> show slave status\G;
+----
+Master_Log_File: mysql-bin.000001
+Read_Master_Log_Pos: 449 #与主库Position一致
+Exec_Master_Log_Pos: 449 #同步到的主库position
+====
