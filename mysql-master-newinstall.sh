@@ -256,6 +256,7 @@ echo "==========设置master的MY.CNF=========="
 cat > ${MYSQL_CNF} <<EOF
 [client]
 port=$PORT
+default-character-set = utf8mb4
 
 [mysql]
 ${MYSQL_CONF}
