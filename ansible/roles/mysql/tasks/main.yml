@@ -1,0 +1,126 @@
+---
+
+- name: 检测是否已安装mysql
+  shell: ls /usr/sbin/mysqld 2>/dev/null >/dev/null; echo $?
+  changed_when: false
+  register: mysql_check
+
+- name: 设置has_mysql变量
+  set_fact: has_mysql={{ mysql_check.stdout.strip() == '0' }} 
+
+#- name: 已安装mysql,退出
+#  fail: 
+#    msg: "mysql已经安装过了"
+#  when: has_mysql
+
+- name: 新增 mysql 用户
+  user: name=mysql shell=/bin/nologin create_home=no group=mysql
+
+- name: 新增 mysql 用户
+  group: name=mysql
+
+- name: 下载mysql rpm包
+  get_url:
+    url: "{{ downloadurl }}/{{ item }}-{{ version }}.rpm"
+    dest: "{{ tmpdir }}/{{ item }}-{{ version }}.rpm"
+    force: yes
+  register: get_url_result
+  until: "'OK' in get_url_result.msg or 'file already exists' in get_url_result.msg"
+  retries: 3
+  delay: 5
+  with_items:
+    - mysql-server
+    - mysql-client
+    - mysql-devel
+    - mysql-libs
+    - mysql-common
+    - mysql-libs-compat
+  when: not has_mysql
+
+- name: 安装 numactl
+  yum: 
+    name: numactl 
+    state: present
+  when: not has_mysql
+
+- name: 安装 mysql 包
+  yum: 
+    name: "{{ tmpdir }}/{{ item }}-{{ version }}.rpm"
+    state: present
+  with_items:
+    - mysql-server
+    - mysql-client
+    - mysql-devel
+    - mysql-libs
+    - mysql-common
+    - mysql-libs-compat
+  when: not has_mysql
+
+- name: 配置my.cnf,备份旧文件
+  template: 
+    src: my.cnf.{{ version }}.j2
+    dest: "{{ MYSQL_CNF }}"
+    backup: yes
+
+- name: 创建data目录
+  file: path={{ DATA_DIR }} state=directory owner=mysql group=mysql
+
+- name: 创建binlog目录
+  file: path={{ LOG_BIN }} state=directory owner=mysql group=mysql
+
+- name: 创建slowlog目录
+  file: path={{ SLOW_PATH }} state=directory owner=mysql group=mysql
+
+- name: 创建表空间目录
+  file: path={{ DS_PRE }} state=directory owner=mysql group=mysql
+
+- name: 启动mysql
+  service: 
+    name: mysqld
+    state: started
+
+- name: 获得mysql默认密码
+  command: >
+    sed '/A temporary password/!d;s/.*: //' {{ LOG_ERROR }}
+    warn=no
+  register: default_pass_st
+
+- name: 设置root 默认密码
+  set_fact: default_pass={{ default_pass_st.stdout }}
+
+- name: 判断root密码是否改过
+  shell: >
+    mysql -uroot -P{{ PORT }} -S{{ SOCKET }} -p'{{ root_pass }}' -e "show databases;"
+    warn=no
+  ignore_errors: yes
+  register: check_root_pass_st
+
+- name: 如果root密码改过,设置为true
+  set_fact: change_root_pass_not={{ check_root_pass_st.failed }}
+
+- name: 修改root密码
+  shell: >
+    mysql -uroot -P{{ PORT }} -S{{ SOCKET }} -p'{{ default_pass }}' --connect-expired-password  -e "SET PASSWORD = PASSWORD('{{ root_pass }}');"
+    warn=no
+  register: change_passwd_st
+  when: 
+    - default_pass| length != 0
+    - change_root_pass_not
+
+- name: 参数设置
+  shell: >
+    mysql -uroot -P{{ PORT }} -S{{ SOCKET }} -p'{{ root_pass }}' -e "set global validate_password_policy=0;set global validate_password_length=0;set global validate_password_mixed_case_count=0;set global validate_password_number_count=0;set global validate_password_special_char_count=0;"
+    warn=no
+  when: not change_root_pass_not
+
+- name: 关闭密码策略
+  blockinfile:
+    dest: "{{ MYSQL_CNF }}"
+    insertafter: default_password_lifetime
+    block: |
+      validate_password.policy=0
+      validate_password.length=0
+      validate_password.number_count=0
+      validate_password.mixed_case_count=0
+      validate_password.special_char_count=0
+  when: not change_root_pass_not

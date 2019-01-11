@@ -1,0 +1,96 @@
+[client]
+port={{ PORT }}
+default-character-set = {{ CHARSET }}
+
+[mysql]
+socket={{ SOCKET }}
+default-character-set = {{ CHARSET }}
+no_auto_rehash
+
+[mysqld]
+user = mysql
+port={{ PORT }}
+basedir=/usr
+datadir={{ DATA_DIR }}
+socket= {{ SOCKET }}
+log-error= {{ LOG_ERROR }}
+pid-file={{ PID_FILE }}
+character-set-server = {{ CHARSET }}
+collation-server = {{ COLLATION }}
+slow_query_log=1
+long_query_time=3
+slow_query_log_file={{ SLOW_PATH }}/slow_query.log
+default_password_lifetime=0
+server_id={{ ip_list[2]+ip_list[3] }}
+log-bin={{ LOG_BIN }}/mysql-bin
+binlog_format=ROW
+sync_binlog=0
+binlog_group_commit_sync_delay=1000000
+binlog_group_commit_sync_no_delay_count=20
+expire_logs_days=5
+innodb_large_prefix=1
+query_cache_type=0
+query_cache_size=0
+skip-character-set-client-handshake
+wait_timeout=600
+interactive_timeout=600
+connect_timeout=30
+net_read_timeout=60
+net_write_timeout=120
+explicit_defaults_for_timestamp=1 
+max_connections=1000
+max_connect_errors = 30
+skip_external_locking 
+skip_name_resolve
+read_only=0
+event_scheduler=0
+default-storage-engine=INNODB
+innodb_strict_mode=1 
+innodb_file_per_table=1
+innodb_buffer_pool_size={{ POOL_SIZE }}
+innodb_io_capacity={{ IO_CAP }}
+innodb_flush_neighbors=1
+innodb_log_file_size=256M
+innodb_flush_log_at_trx_commit=2
+innodb_stats_on_metadata=0
+innodb_data_home_dir=
+innodb_data_file_path={{ DATA_FILE_PATH }}
+innodb_temp_data_file_path ={{ TMP_FILE_PATH }}
+innodb_log_group_home_dir = {{ LOG_PATH }}
+innodb_buffer_pool_instances = 8
+innodb_read_io_threads = 64
+innodb_write_io_threads = 64
+transaction_isolation=READ-COMMITTED
+key_buffer_size=256M
+max_allowed_packet=16M
+sort_buffer_size=2M
+read_buffer_size=2M
+read_rnd_buffer_size=2M
+join_buffer_size=2M
+sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES
+tmp_table_size=128M
+max_heap_table_size=128M
+group_concat_max_len=64K
+table_open_cache=2048
+thread_cache_size=1024
+log_bin_trust_function_creators=1
+open_files_limit=60000
+lower_case_table_names=1
+secure_file_priv=
+
+
+[mysqld_multi]
+mysqld=/usr/bin/mysqld_safe
+mysqladmin=/usr/bin/mysqladmin
+
+[mysqldump]
+quick
+[myisamchk]
+key_buffer_size = 20M
+sort_buffer_size = 20M
+read_buffer = 2M
+write_buffer = 2M
+[mysqlhotcopy]
+interactive-timeout
+[mysqld_safe]
+pid-file={{ PID_FILE }}
