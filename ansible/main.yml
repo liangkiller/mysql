@@ -1,6 +1,0 @@
----
-
-- name: 安装 mysql
-  hosts: vps
-  roles:
-    - mysql
